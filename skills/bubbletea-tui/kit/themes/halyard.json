@@ -4,11 +4,13 @@
  "read": "Freight and vessel tracking for port operators (fictional). Precise, nautical, signal-flag clear. Deep navy with international orange as the signal; ocean blue second. A filled orange flag-strip header with the name TRACKED like a hull marking, ▲ △ sails as the backdrop field, ┄ chart-line rules, a thin ▎ bar, full-width orange selection, [ bracket ] buttons, slash tabs, compact density, boxed keys under a rule. Its loudest mark: the orange flag at the top.",
  "ansi16": {
   "dark": {
-   "primary": 13,
-   "warning": 11
+   "primary": 11,
+   "accent": 11,
+   "warning": 3
   },
   "light": {
-   "primary": 5,
+   "primary": 0,
+   "accent": 0,
    "error": 1,
    "warning": 3
   }

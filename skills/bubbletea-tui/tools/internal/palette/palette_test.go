@@ -395,22 +395,31 @@ func TestCheckFailsStateClashesAt16Colours(t *testing.T) {
 	 "light": {"bg": "#FAF9F6", "fg": "#333230", "primary": "#AF7400", "error": "#A13E40", "warning": "#A8481F", "success": "#007835", "info": "#006A9D"}}`
 	for _, c := range []struct {
 		name, extra string
-		code        int
+		code, fails int
 		stderr      []string
 	}{
-		{"focus fg, no pin", `, "expressions": {"focus": "fg"}`, 1, []string{
+		// the amber is warm (WarmPin16): off red it takes yellow 11 on a dark page, and
+		// on a light one no hue (fg's grey 0), whatever the focus
+		{"focus fg, no pin", `, "expressions": {"focus": "fg"}`, 1, 2, []string{
 			`dark: primary #D99A3B draws as ANSI 9 at 16 colours (-profile ansi), error's red, so it reads as an error there: pin it with "ansi16": {"dark": {"primary": 11}}`,
-			`light: primary #AF7400 draws as ANSI 1 at 16 colours (-profile ansi), error's red, so it reads as an error there: pin it with "ansi16": {"light": {"primary": 3}}`,
+			`light: primary #AF7400 draws as ANSI 1 at 16 colours (-profile ansi), error's red, so it reads as an error there: pin it with "ansi16": {"light": {"primary": 0}}`,
 			`warning: `, `dark: warning #F28C6B draws as ANSI 9 at 16 colours (-profile ansi), error's red, so it reads as an error there; "ansi16": {"dark": {"warning": 3}} moves it`}},
-		{"focus fg, pinned", `, "expressions": {"focus": "fg"}, "ansi16": {"dark": {"primary": 11, "warning": 3}, "light": {"primary": 3, "warning": 5}}`, 0, nil},
+		{"focus fg, pinned", `, "expressions": {"focus": "fg"}, "ansi16": {"dark": {"primary": 11, "warning": 3}, "light": {"primary": 0, "warning": 3}}`, 0, 0, nil},
 		// under focus "primary" the hue is the kit's emphasis: on error's red it is a
 		// warning (focus reads as an error there), not a failure; the amber, also on red
 		// with the warning, takes the yellow nearest its hue first (PinOrder) and the
 		// warning its own slot's other brightness
-		{"focus primary", ``, 0, []string{`warning: `, `dark: primary #D99A3B draws as ANSI 9 at 16 colours (-profile ansi), error's red, so focus and selection read as errors there; "ansi16": {"dark": {"primary": 11}} moves it`,
+		{"focus primary", ``, 0, 0, []string{`warning: `, `dark: primary #D99A3B draws as ANSI 9 at 16 colours (-profile ansi), error's red, so focus and selection read as errors there; "ansi16": {"dark": {"primary": 11}} moves it`,
 			`dark: warning #F28C6B draws as ANSI 9 at 16 colours (-profile ansi), error's red, so it reads as an error there; "ansi16": {"dark": {"warning": 3}} moves it`}},
 		// a clash between two status roles off red: a warning
-		{"status clash", `, "ansi16": {"dark": {"primary": 11, "warning": 10}, "light": {"primary": 3, "warning": 3}}`, 0, []string{`warning: `, `dark: warning #F28C6B draws as ANSI 10 at 16 colours (-profile ansi), as success #6ACB82 does, so those states differ there only by glyph and word`}},
+		{"status clash", `, "ansi16": {"dark": {"primary": 11, "warning": 3, "info": 10}, "light": {"primary": 0, "warning": 3}}`, 0, 0, []string{`warning: `, `dark: info #56BDFF draws as ANSI 10 at 16 colours (-profile ansi), as success #6ACB82 does, so those states differ there only by glyph and word`}},
+		// but a warning on green reads as OK: it fails, and its pin is yellow (#51)
+		{"warning on green", `, "ansi16": {"dark": {"primary": 11, "warning": 10}, "light": {"primary": 0, "warning": 2}}`, 1, 2, []string{
+			`dark: warning #F28C6B draws as ANSI 10 at 16 colours (-profile ansi), success's green, so a warning reads as success there; the warning keeps yellow: pin it with "ansi16": {"dark": {"warning": 3}}`,
+			`light: warning #A8481F draws as ANSI 2 at 16 colours (-profile ansi), success's green, so a warning reads as success there; the warning keeps yellow: pin it with "ansi16": {"light": {"warning": 3}}`}},
+		// on info's blue or cyan it warns, and moves back to yellow
+		{"warning on cyan", `, "ansi16": {"dark": {"primary": 11, "warning": 14}, "light": {"primary": 0, "warning": 6}}`, 0, 0, []string{
+			`warning: `, `light: warning #A8481F draws as ANSI 6 at 16 colours (-profile ansi), info's cyan, so a warning reads as info there; the warning keeps yellow; "ansi16": {"light": {"warning": 3}} moves it`}},
 	} {
 		path := filepath.Join(t.TempDir(), "theme.json")
 		if err := os.WriteFile(path, []byte(`{"roles": `+roles+c.extra+`}`), 0o644); err != nil {
@@ -429,7 +438,7 @@ func TestCheckFailsStateClashesAt16Colours(t *testing.T) {
 		if c.stderr == nil && errb.String() != "" {
 			t.Errorf("%s: stderr %q, want no clash with primary", c.name, errb.String())
 		}
-		if c.code == 1 && !strings.Contains(out.String(), "FAIL (0 contrast problems, 2 problems at 16 colours)") {
+		if c.code == 1 && !strings.Contains(out.String(), fmt.Sprintf("FAIL (0 contrast problems, %d problems at 16 colours)", c.fails)) {
 			t.Errorf("%s: verdict %q", c.name, out.String())
 		}
 	}
@@ -682,8 +691,10 @@ func TestCheckReportsNeutralsAt16Colours(t *testing.T) {
 }
 
 // A yellow brand sits natively on warning's slot (#FFE600 is ANSI 3 on a light page)
-// while its warning lands on red: primary is evicted to the nearest free hue and warning
-// takes its own yellow, rather than warning going to cyan around a primary that stays.
+// while its warning lands on red: primary moves off it and warning takes its own yellow,
+// rather than warning going to cyan around a primary that stays. On a dark page the
+// brand is evicted to the nearest free hue; on a light one it has no hue (WarmPin16:
+// cyan 6, the nearest, is 2.8:1 on white).
 func TestYellowBrandKeepsWarningYellow(t *testing.T) {
 	f := themeOf(Derive("#FFE600", "#556B2F", "", "", "", 0.012))
 	pins := Pins16(f)
@@ -713,7 +724,11 @@ func TestYellowBrandKeepsWarningYellow(t *testing.T) {
 		native := theme.ANSI16Index(theme.File{Roles: f.Roles}, mode, "primary")
 		if native == 3 || native == 11 {
 			evicted = true
-			if want := fmt.Sprintf(`%s: primary %s draws as ANSI %d at 16 colours (-profile ansi), warning's own slot, which warning needs; "ansi16": {%q: {"primary": `, mode, hex, native, mode); !strings.Contains(errb.String(), want) {
+			want := fmt.Sprintf(`%s: primary %s draws as ANSI %d at 16 colours (-profile ansi), warning's own slot, which warning needs; "ansi16": {%q: {"primary": `, mode, hex, native, mode)
+			if mode == "light" { // a yellow brand has no hue on a light page (WarmPin16): it moves to fg's grey, not to cyan 6
+				want = fmt.Sprintf(`%s: primary %s (hue %.0f°, yellow) draws as ANSI %d at 16 colours (-profile ansi), yellow; on a light page a yellow brand has no slot`, mode, hex, hueOf(hex), native)
+			}
+			if !strings.Contains(errb.String(), want) {
 				t.Errorf("%s: stderr %q, want %q", mode, errb.String(), want)
 			}
 		}
@@ -722,6 +737,9 @@ func TestYellowBrandKeepsWarningYellow(t *testing.T) {
 		t.Errorf("#FFE600 sits on neither yellow natively (pins %v); the case no longer tests eviction", pins)
 	}
 }
+
+// hueOf is hex's OKLCH hue.
+func hueOf(hex string) float64 { _, _, h := oklch.LCH(hex); return h }
 
 // On a mid-grey page a primary tunes to the end of the ramp, where a lightness step
 // lands on the primary itself: secondary then steps in chroma, and tertiary differs from
@@ -791,21 +809,26 @@ func TestCheckFailsDialogRolesOnRedAt16Colours(t *testing.T) {
 	}
 }
 
-// An amber brand and its warning both land on red at 16 colours. derive pins primary to
-// the slot nearest its hue first (yellow, 11 dark and 3 light) and moves warning off it,
-// never primary to green 10 or magenta 5 with warning on the yellow: the brand amber
-// drew as bright green on a dark page and magenta on a light one, beside success's
-// green, and check proposed 11/3 for the same theme unpinned. A yellow brand that sits
-// natively on warning's slot still yields it (TestYellowBrandKeepsWarningYellow).
+// An amber brand and its warning both land on red at 16 colours. derive pins primary
+// first, never to green 10 or magenta 5 with warning on the yellow (the brand amber drew
+// as bright green on a dark page and magenta on a light one, beside success's green):
+// on a dark page to yellow 11, with the warning on the other yellow, 3; on a light page
+// to fg's grey, since yellow 3 is unreadable on white, and the warning keeps its 3 (an
+// amber is warm, WarmPin16). A yellow brand that sits natively on warning's slot still
+// yields it (TestYellowBrandKeepsWarningYellow).
 func TestDerivePinsPrimaryToItsHueFirst(t *testing.T) {
 	f := themeOf(Derive("#D99A3B", "", "", "#17140F", "#F6F1E6", 0.012))
 	pins := Pins16(f)
-	for mode, yellow := range map[string]int{"dark": 11, "light": 3} {
-		if got := pins[mode]["primary"]; got != yellow {
-			t.Errorf("%s: primary pinned to %d, want yellow %d (pins %v)", mode, got, yellow, pins[mode])
+	f.ANSI16 = pins
+	for _, c := range []struct {
+		mode             string
+		primary, warning int
+	}{{"dark", 11, 3}, {"light", 0, 3}} {
+		if got := pins[c.mode]["primary"]; got != c.primary {
+			t.Errorf("%s: primary pinned to %d, want %d (pins %v)", c.mode, got, c.primary, pins[c.mode])
 		}
-		if w, ok := pins[mode]["warning"]; !ok || w == yellow || w == 1 || w == 9 {
-			t.Errorf("%s: warning pinned to %d (ok %v), want a slot off yellow and red", mode, w, ok)
+		if w := theme.ANSI16Index(f, c.mode, "warning"); w != c.warning {
+			t.Errorf("%s: warning draws as ANSI %d, want yellow %d (pins %v)", c.mode, w, c.warning, pins[c.mode])
 		}
 	}
 	// the same brand through the command: pins written, no pin for primary off yellow
@@ -814,7 +837,7 @@ func TestDerivePinsPrimaryToItsHueFirst(t *testing.T) {
 	if code := Main([]string{"derive", "#D99A3B", "--bg", "#17140F", "--light-bg", "#F6F1E6", "--out", out}, "", &dOut, &dErr); code != 0 {
 		t.Fatalf("derive: exit %d\n%s", code, dErr.String())
 	}
-	if !strings.Contains(dErr.String(), "dark primary 11") || !strings.Contains(dErr.String(), "light primary 3") {
+	if !strings.Contains(dErr.String(), "dark primary 11") || !strings.Contains(dErr.String(), "light primary 0") {
 		t.Errorf("derive pinned %q", dErr.String())
 	}
 	if strings.Contains(dErr.String(), "of hue from its own") {
@@ -824,8 +847,9 @@ func TestDerivePinsPrimaryToItsHueFirst(t *testing.T) {
 
 // The yellow brand's eviction is per mode: a dark lime natively on 11 yields the yellow
 // to its warning there, and that must not send the light amber primary, natively on
-// red, back to the status-first order and onto magenta 5 (the K12 miss again); and
-// derive's own pins for the evicted yellow brand (#FFE600, light primary 6, warning 3)
+// red, back to the status-first order and onto magenta 5 (the K12 miss again: it is
+// warm, so it has no hue on a light page, WarmPin16); and
+// derive's own pins for the evicted yellow brand (#FFE600, light primary 0, warning 3)
 // draw no far-pin warning, since the lifted theme pins primary nowhere, so there is no
 // nearer pin to name (naming warning's 3 put both on one slot).
 func TestEvictionIsPerMode(t *testing.T) {
@@ -840,8 +864,8 @@ func TestEvictionIsPerMode(t *testing.T) {
 	if got := pins["dark"]["warning"]; got != 11 {
 		t.Errorf("dark: warning pinned to %d, want its own 11 (the lime yields it)", got)
 	}
-	if got := pins["light"]["primary"]; got != 3 {
-		t.Errorf("light: primary pinned to %d, want yellow 3 (pins %v)", got, pins["light"])
+	if got := pins["light"]["primary"]; got != 0 {
+		t.Errorf("light: primary pinned to %d, want fg's grey 0, a warm brand's on a light page (pins %v)", got, pins["light"])
 	}
 	yellow := themeOf(Derive("#FFE600", "#556B2F", "", "", "", 0.012))
 	yellow.ANSI16 = Pins16(yellow)
@@ -864,28 +888,35 @@ func TestEvictionIsPerMode(t *testing.T) {
 	}
 }
 
-// A pin that moves a role far from its own hue (an amber primary on green 10, 67° off)
+// A pin that moves a role far from its own hue (a rose primary on blue 12, 109° off)
 // while the tool itself would pin it nearer reads as another state: check warns, naming
-// the hex, its hue, the slot and the nearer pin. A pin under 60° (ferrous's warning
-// #CFA24E on yellow 11, 29°) or one that is the nearest free hue (ferrous's orange on
-// magenta, with red error's and yellow warning's) is not reported; nor is a neutral's.
+// the hex, its hue, the slot and the nearer pin. A pin under 60° (the rose on magenta
+// 13, 45° off) is not reported; nor is a neutral's. A warm brand off its slot (the
+// amber on green 10, blue 12 or magenta 5) is Findings16's, which names the slot
+// (WarmPin16), not a far pin: its slot is no nearer its hue than magenta, so "nearer"
+// would be false (#51).
 func TestCheckWarnsOnAFarPin(t *testing.T) {
-	roles := `{"dark": {"bg": "#17140F", "fg": "#E8E2D6", "primary": "#D99A3B", "warning": "#F2C35C", "success": "#6ACB82", "error": "#EF8482", "info": "#56BDFF"}, "light": {"bg": "#F6F1E6", "fg": "#2B2620", "primary": "#AF7400", "warning": "#8C6800", "success": "#007835", "error": "#A13E40", "info": "#006A9D"}}`
+	rose := `{"dark": {"bg": "#17140F", "fg": "#E8E2D6", "primary": "#D94060", "warning": "#F2C35C", "success": "#6ACB82", "error": "#EF8482", "info": "#56BDFF"}}`
+	amber := `{"dark": {"bg": "#17140F", "fg": "#E8E2D6", "primary": "#D99A3B", "warning": "#F2C35C", "success": "#6ACB82", "error": "#EF8482", "info": "#56BDFF"}, "light": {"bg": "#F6F1E6", "fg": "#2B2620", "primary": "#AF7400", "warning": "#8C6800", "success": "#007835", "error": "#A13E40", "info": "#006A9D"}}`
 	for _, c := range []struct {
-		name, pins string
-		want, not  []string
+		name, roles, pins string
+		want, not         []string
 	}{
-		{"derive's old pins", `{"dark": {"primary": 10, "warning": 11}, "light": {"primary": 5, "warning": 3}}`, []string{
-			`dark: primary #D99A3B is pinned to ANSI 10 at 16 colours (-profile ansi), bright green, 69° of hue from its own 74°, so the brand reads as green there; "ansi16": {"dark": {"primary": 11}} is nearer its hue (yellow, 36° off), with warning moved off it`,
-			`light: primary #AF7400 is pinned to ANSI 5 at 16 colours (-profile ansi), magenta, 105° of hue from its own 74°, so the brand reads as magenta there; "ansi16": {"light": {"primary": 3}} is nearer its hue (yellow, 36° off), with warning moved off it`,
+		{"a hand pin far off", rose, `{"dark": {"primary": 12, "warning": 11}}`, []string{
+			`dark: primary #D94060 is pinned to ANSI 12 at 16 colours (-profile ansi), bright blue, 109° of hue from its own 13°, so the brand reads as blue there; "ansi16": {"dark": {"primary": 13}} is nearer its hue (magenta, 45° off)`,
 		}, nil},
-		{"the nearest free hue", `{"dark": {"primary": 11, "warning": 3}, "light": {"primary": 3, "warning": 6}}`, nil, []string{"of hue from its own"}},
-		{"a hand pin far off", `{"dark": {"primary": 12, "warning": 3}, "light": {"primary": 3, "warning": 6}}`, []string{
-			`dark: primary #D99A3B is pinned to ANSI 12 at 16 colours (-profile ansi), bright blue, 170° of hue from its own 74°, so the brand reads as blue there; "ansi16": {"dark": {"primary": 11}} is nearer its hue (yellow, 36° off)`,
+		{"with the nearer slot held", rose, `{"dark": {"primary": 12, "warning": 11, "info": 13}}`, []string{
+			`"ansi16": {"dark": {"primary": 13}} is nearer its hue (magenta, 45° off), with info moved off it`,
 		}, nil},
+		{"the nearest free hue", rose, `{"dark": {"primary": 13, "warning": 11}}`, nil, []string{"of hue from its own"}},
+		{"derive's old pins for an amber", amber, `{"dark": {"primary": 10, "warning": 11}, "light": {"primary": 5, "warning": 3}}`, []string{
+			`dark: primary #D99A3B (hue 74°, warm) draws as ANSI 10 at 16 colours (-profile ansi), bright green; a warm brand has no slot of its own there`, `"ansi16": {"dark": {"primary": 11}} moves it`,
+			`light: primary #AF7400 (hue 74°, warm) draws as ANSI 5 at 16 colours (-profile ansi), magenta; on a light page a warm brand has no slot`, `"ansi16": {"light": {"primary": 0}} moves it`,
+		}, []string{"of hue from its own"}},
+		{"an amber on its slots", amber, `{"dark": {"primary": 11, "warning": 3}, "light": {"primary": 0}}`, nil, []string{"of hue from its own", "warm"}},
 	} {
 		path := filepath.Join(t.TempDir(), "theme.json")
-		if err := os.WriteFile(path, []byte(`{"roles": `+roles+`, "ansi16": `+c.pins+`}`), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(`{"roles": `+c.roles+`, "ansi16": `+c.pins+`}`), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		var out, errb bytes.Buffer

@@ -19,7 +19,7 @@
     ok   onWarning    on warning    7.33  (want ≥4.5)  #1A1B1D / #CFA24E
     ok   onError      on error      4.17  (want ≥3.5)  #1A1B1D / #E0453A
     ok   onSuccess    on success    5.60  (want ≥3.5)  #1A1B1D / #6E9E78
-    ok   fgSelected   on primary    3.83  (want ≥3.5)  #FFFFFF / #E25317
+    ok   fgSelected   on primary    5.48  (want ≥3.5)  #000000 / #E25317
     ok   fgSubtle     on bgSubtle   2.72  (want ≥2.3)  #6A7076 / #2C2E31
   light
     ok   fg           on bg        17.38  (want ≥7.0)  #141516 / #FAF9F7

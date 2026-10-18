@@ -110,11 +110,13 @@
  },
  "ansi16": {
   "dark": {
-   "primary": 13,
-   "warning": 11
+   "accent": 11,
+   "primary": 11,
+   "warning": 3
   },
   "light": {
-   "primary": 5,
+   "accent": 0,
+   "primary": 0,
    "warning": 3
   }
  }

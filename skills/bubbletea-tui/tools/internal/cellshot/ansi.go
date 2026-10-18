@@ -53,6 +53,11 @@ var basic16 = [16]RGB{{0, 0, 0}, {205, 49, 49}, {13, 188, 121}, {229, 229, 16}, 
 	{17, 168, 205}, {229, 229, 229}, {102, 102, 102}, {241, 76, 76}, {35, 209, 139}, {245, 245, 67},
 	{59, 142, 234}, {214, 112, 214}, {41, 184, 219}, {255, 255, 255}}
 
+// Basic16 is the colour cellshot draws ANSI colour n (0-15) in: VS Code's terminal
+// palette, the one every sheet shows. palette check judges a 16-colour pin's contrast in
+// it (palette.Inks16), so the number it prints is the one the sheet shows.
+func Basic16(n int) RGB { return basic16[n&15] }
+
 // xterm maps a 256-colour index to RGB the way xterm does.
 func xterm(n int) Color {
 	switch {

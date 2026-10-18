@@ -152,7 +152,7 @@ and look at the PNGs. What usually breaks:
   No hex fixes it without leaving amber at 256 colours. Pin the role for 16 colours only:
 
   ```json
-  "ansi16": { "dark": { "primary": 11 }, "light": { "primary": 3 } }
+  "ansi16": { "dark": { "primary": 11, "warning": 3 }, "light": { "primary": 0 } }
   ```
 
   `palette check` names each clash and the pin that fixes it (stderr): it fails error
@@ -163,10 +163,18 @@ and look at the PNGs. What usually breaks:
   (`palette -h` lists them). A warning is not a pass to ignore: pin it unless
   the brand accepts it in its read. Pin bright (9-14) on dark, normal (1-6) on light,
   error to 9/1, a status role to its own slot (warning 3/11, success 2/10, info 4/12 or
-  6/14), never a grey; the user's terminal palette decides the exact colour. A pin
-  that moves a role more than 60° of hue while a nearer slot is free (an amber brand on
-  green 10, with yellow 11 its warning's) warns with the hex, the slot and the nearer
-  pin: the brand reads as a success there.
+  6/14), never a grey but for a warm brand on a light page (below); the user's terminal
+  palette decides the exact colour. A pin that moves a role more than 60° of hue while
+  a nearer slot is free (a rose brand on blue 12, with magenta 13 free) warns with the
+  hex, the slot and the nearer pin: the brand reads as info there.
+- a warm brand (OKLCH 25°–85°: coral, orange, copper, amber) has no slot of its own at
+  16 colours: red is error's, yellow the warning's, magenta the pink an orange is not.
+  On a dark page it takes yellow 11 and the warning keeps yellow 3, so every warning mark
+  carries `▲`/`!`; on a light page it has no hue (`primary` pinned to 0, fg's grey: yellow
+  3 is 1.35:1 on white) and the kit draws focus as fg and bold. Its secondary, tertiary
+  and accent follow it off red and magenta. The warning never leaves yellow: `palette
+  check` fails it on green, and a pinned brand under 3:1 as text or 4.5:1 under its
+  selection ink (white on yellow 11 is 1.17:1), measured in the slot's colour.
 
 ## DO / DON'T
 

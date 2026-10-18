@@ -233,7 +233,9 @@ says the state in words.
   red's slot and under NO_COLOR it is the text colour, so the band is the mark's to say.
   The `ladder` frame shows the marks a reading can carry.
 - Sparkline: `▁▂▃▅▇` over a fixed column, coloured by state, with a flat series kept
-  flat. Always print the current value beside it. A sparkline taller than one row grows
+  flat. Always print the current value beside it. A warning's ends in the warn mark
+  (`ui.StateSparkline`: `▁▃▅▇█ ▲`): at 16 colours a warm brand's yellow and the
+  warning's are one hue, so bars in yellow alone read as the selection. A sparkline taller than one row grows
   upward from the label's row: label, value and the bar's base share the bottom row,
   the rows above hold the peaks, so a two-row graph never splits the label from the
   bar it names (a `▂▆▆▂` fragment alone on a row reads as noise).

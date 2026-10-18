@@ -47,7 +47,7 @@
 // It reports, on stderr, state roles that land on one of the 16 colours (-profile ansi)
 // after the theme's "ansi16" pins, each with the pin that separates them:
 //
-//	"ansi16": {"dark": {"primary": 11}, "light": {"primary": 3}}
+//	"ansi16": {"dark": {"primary": 11, "warning": 3}, "light": {"primary": 0}}
 //
 // Red (1 or 9) is error's. It exits 1 on error off red (a grey error beside a red
 // warning reads reversed), and under "focus": "fg", where primary is a state, on primary
@@ -66,19 +66,32 @@
 // not reported. A pin that names no role, no mode or no colour 0-15 exits 2, as
 // theme.Load does.
 //
-// A suggested pin is a status role's own slot, else the nearest free hue, never red and
-// never the other brightness of a slot another state draws (10 beside success's 2 reads
-// as success). When the brand and a status role are both displaced (an amber and its
-// warning, both on red), the brand takes the slot nearest its hue first (yellow 11/3)
-// and the status role moves, when a slot within 60° of the brand's hue exists; an
-// orange, as far from yellow as from magenta, lets the status roles keep their own and
-// takes the nearest free. A brand that is a status role's own colour (a yellow on 3, or
-// within 25° of yellow's hue) yields the slot, each mode for itself. It warns on a pin,
-// the theme's or derive's, that moves a role
-// more than 60° of OKLCH hue from its truecolour value while the tool would pin it
-// nearer (an amber pinned to green 10 while yellow is its warning's), naming the hex, its
-// hue, the slot and the nearer pin; a pin that is the nearest free hue, however far, is
-// not reported.
+// The warning keeps yellow (11, then 3): on green 2/10, success's slot, it exits 1 (a
+// warning reads as OK), and on blue or cyan, info's, it warns; its pin is yellow, even
+// beside a brand that holds the other one. A warm brand (OKLCH 25°–85°: a vermilion, an
+// orange, a copper, an amber) has no slot of its own: red is error's, yellow the
+// warning's, magenta the pink an orange is not. On a dark page it takes bright yellow 11
+// and the warning the other yellow, 3, told apart by the warning's glyph (▲ !); on a
+// light page it has no hue, pinned to fg's grey 0 (yellow 3 is 1.35:1 on white), and the
+// kit draws focus as fg and bold, as under "focus": "fg". A yellow brand has no hue on a
+// light page either. Each off its slot is a warning with the pin.
+//
+// A primary the theme pins to a hue is checked there, in cellshot's palette (VS Code's
+// terminal, the one every sheet shows): primary as text on the page at 3:1, and
+// fgSelected (unless "focus": "fg") and onPrimary on it at 4.5:1, each as the kit draws
+// it. Under one, it exits 1: white on bright yellow is 1.17:1, which the truecolour check
+// of the hex never sees.
+//
+// Any other suggested pin is a status role's own slot, else the nearest free hue, never
+// red and never the other brightness of a slot another state draws (10 beside success's
+// 2 reads as success). When the brand and a status role are both displaced (an amber and
+// its warning, both on red), the brand takes its slot first and the status role moves. A
+// brand that is a status role's own colour (a yellow on 3, or within 25° of yellow's
+// hue) yields the slot, each mode for itself. It warns on a pin, the theme's or
+// derive's, that moves a role more than 60° of OKLCH hue from its truecolour value while
+// the tool would pin it nearer (a rose pinned to blue 12 while magenta is free), naming
+// the hex, its hue, the slot and the nearer pin; a pin that is the nearest free hue,
+// however far, is not reported.
 //
 // Thresholds (WCAG 2 contrast ratio against the role's background):
 //
@@ -99,8 +112,9 @@
 // On a mid-tone fill where neither ink clears its floor, derive deepens the ink toward
 // black or white along its hue (the engine does the same), so the brand keeps its hex.
 //
-// Exit status: 0 OK, 1 contrast problems, error off red, a state clash under focus "fg"
-// or a neutral on red at 16 colours; 2 usage or input errors.
+// Exit status: 0 OK, 1 contrast problems, error off red, a state clash under focus "fg",
+// a neutral on red, a warning on green or a pinned primary under its floors at 16
+// colours; 2 usage or input errors.
 package main
 
 import (

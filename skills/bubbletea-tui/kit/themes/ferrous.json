@@ -4,11 +4,13 @@
  "read": "Industrial IoT for field engineers on rugged laptops in bright light (fictional). Blunt, exact, undecorated: a readout, not a dashboard. Rust #E25317 is the only hue that points; everything else is steel. Square and heavy, 'stencilled on a machine': a FERROUS stamp at the right of the header, ═ and ━ rules, a heavy dialog, inverse block buttons, [BRACKET] tags, full-width rust selection bars, UPPERCASE labels, compact density, a filled status strip, no motion and no gradient.",
  "ansi16": {
   "dark": {
-   "primary": 13,
-   "warning": 11
+   "primary": 11,
+   "secondary": 11,
+   "warning": 3
   },
   "light": {
-   "primary": 5,
+   "primary": 0,
+   "secondary": 0,
    "warning": 3
   }
  },
@@ -24,7 +26,7 @@
    "fg": "#D7D9DC",
    "fgMuted": "#9298A0",
    "fgSubtle": "#6A7076",
-   "fgSelected": "#FFFFFF",
+   "fgSelected": "#000000",
    "border": "#3C3F44",
    "borderFocus": "#E25317",
    "success": "#6E9E78",

@@ -8,9 +8,9 @@
    "warning": 3
   },
   "light": {
-   "primary": 3,
+   "primary": 0,
    "error": 1,
-   "warning": 5
+   "warning": 3
   }
  },
  "roles": {

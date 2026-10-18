@@ -561,7 +561,12 @@ func modes16(f File) []string {
 // ANSI16Index is the 16-colour index role draws as in mode (dark, light), after the
 // theme's ansi16 pins: what a terminal with 16 colours shows. -1 for no such role.
 func ANSI16Index(f File, mode, role string) int {
-	c := paletteRole(ResolveProfile(f, mode != "light", false, colorprofile.ANSI).P, role)
+	return Slot16(paletteRole(ResolveProfile(f, mode != "light", false, colorprofile.ANSI).P, role))
+}
+
+// Slot16 is the one of the 16 colours c draws as on a 16-colour terminal: c itself when
+// it is one (a pinned role), else the nearest. -1 for nil.
+func Slot16(c color.Color) int {
 	if c == nil {
 		return -1
 	}
@@ -715,6 +720,7 @@ type Theme struct {
 	KeyDisambiguation bool
 
 	promptTertiary bool // the focus ink doesn't read on bgOverlay: the prompt keeps tertiary (build)
+	plainBrand     bool // primary is pinned to a grey at 16 colours: no hue, so the brand is fg and bold (build)
 }
 
 // Resolve picks the dark or light roles, fills gaps, and builds every style, for a
@@ -728,7 +734,8 @@ func Resolve(f File, dark, ascii bool) *Theme {
 // (tea.ColorProfileMsg: 16 colours, 256, or none under NO_COLOR). At 16 colours every
 // neutral role draws on one of the four greys (GreySlot16: the page 0 or 15, body text
 // the opposite, fgMuted and fgSubtle on 7 and 8) and the theme's ansi16 pins replace
-// the roles they name. Where a
+// the roles they name; a primary pinned to a grey has no hue, and the kit's focus draws
+// as under expressions.focus "fg" (fg and bold), brand text in fg and bold. Where a
 // background step the styles separate things with can't be told from the page at
 // that profile (Distinct), they add an edge instead: a borderless dialog gets a rule
 // above and below. A rule or border colour that lands on bg moves to the nearest one
@@ -764,14 +771,36 @@ func ResolveProfile(f File, dark, ascii bool, profile colorprofile.Profile) *The
 		t.G = ASCII(t.G)
 	}
 	t.X = exprDefaults(f.Expressions)
+	// primary pinned to a grey at 16 colours has no hue there (a warm brand on a light
+	// page: yellow 3 is unreadable on white, magenta is pink): the kit's emphasis falls
+	// back as under focus "fg", and brand text is fg and bold
+	if n, ok := pins["primary"]; ok && Grey16(n) {
+		t.X.Focus, t.plainBrand = "fg", true
+	}
 	if t.X.Focus == "fg" && r.BorderFocus == "" {
 		t.P.BorderFocus = t.P.FgMuted // the dialog border is chrome too: not the hue
 	}
 	// rules are "barely lighter than bg": downsampled, they can land on bg itself and
 	// every section, table and footer rule vanishes
 	t.P.Border, t.P.BorderFocus = t.edge(t.P.Border), t.edge(t.P.BorderFocus)
+	// a pin moves a fill to a slot its ink was never chosen for: halyard's dark ink on a
+	// primary pinned to fg's black (a warm brand on a light page) is black on black in
+	// the header bar, the dialog title and a filled tag. Each ink that lands on its
+	// fill's slot takes fg or bg instead (Ink), once, for every component that draws it
+	if pins != nil {
+		p := &t.P
+		p.OnPrimary, p.FgSelected = t.Ink(p.OnPrimary, p.Primary), t.Ink(p.FgSelected, p.Primary)
+		p.OnSecondary, p.OnError = t.Ink(p.OnSecondary, p.Secondary), t.Ink(p.OnError, p.Error)
+		p.OnWarning, p.OnSuccess = t.Ink(p.OnWarning, p.Warning), t.Ink(p.OnSuccess, p.Success)
+	}
 	t.S = build(t)
 	return t
+}
+
+// Resolve16 is ResolveProfile at 16 colours (colorprofile.ANSI), without ASCII: what a
+// checker judges a theme's ansi16 pins by.
+func Resolve16(f File, dark bool) *Theme {
+	return ResolveProfile(f, dark, false, colorprofile.ANSI)
 }
 
 // Distinct reports whether a and b draw as different colours at the theme's profile:

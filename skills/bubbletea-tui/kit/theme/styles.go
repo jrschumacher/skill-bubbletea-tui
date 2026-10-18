@@ -55,6 +55,9 @@ func build(t *Theme) Styles {
 	s.Subtle = s.Base.Foreground(p.FgSubtle)
 	s.Bold = s.Base.Bold(true)
 	s.Primary = s.Base.Foreground(p.Primary)
+	if t.plainBrand { // primary pinned to a grey: no hue, so the brand's text is set apart by weight
+		s.Primary = s.Primary.Bold(true)
+	}
 	s.Secondary = s.Base.Foreground(p.Secondary)
 	s.Tertiary = s.Base.Foreground(p.Tertiary)
 	s.Accent = s.Base.Foreground(p.Accent)

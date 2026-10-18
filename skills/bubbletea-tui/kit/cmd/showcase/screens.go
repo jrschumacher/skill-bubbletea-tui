@@ -159,11 +159,6 @@ func (m *app) services(c *ui.Canvas, r uv.Rectangle) {
 		if s.State == "deploying" {
 			name = ui.Busy(t, m.frame/2) + " " + t.S.Base.Render(s.Name)
 		}
-		// red lives on the dot and the number; the sparkline stays quiet
-		spark := t.S.Muted
-		if s.State == "warning" {
-			spark = t.S.Warn
-		}
 		errs := t.S.Soft.Render(s.ErrRate)
 		if s.State == "error" {
 			errs = t.S.Err.Bold(true).Render(s.ErrRate)
@@ -172,7 +167,7 @@ func (m *app) services(c *ui.Canvas, r uv.Rectangle) {
 		if i == m.sel {
 			ver = t.S.Soft.Render(s.Version)
 		}
-		row := []string{name, ver, ui.Sparkline(t, s.P99, 12, spark), errs}
+		row := []string{name, ver, ui.StateSparkline(t, s.State, s.P99, 12), errs}
 		if wide {
 			row = append(row, t.S.Subtle.Render(s.Deployed))
 		}

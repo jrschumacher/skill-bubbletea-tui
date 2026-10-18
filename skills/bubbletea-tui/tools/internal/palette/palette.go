@@ -399,7 +399,9 @@ var onFills = []struct{ on, fill string }{
 // nearest in OKLCH hue whose other brightness no state role draws either (10 beside a
 // success on 2 is a different slot and the same reading). Bright (9-14) on a dark page,
 // normal (1-6) on a light one, where terminal palettes put their legible hues. The greys
-// (0, 7, 8, 15) carry no state and are never offered.
+// (0, 7, 8, 15) carry no state and are never offered. A warning takes yellow even when
+// both are held: on any other hue it reads as another state, and its glyph tells it from
+// what shares the slot.
 func Pin16(role, hex string, dark bool, used map[int]bool) int {
 	shift := 0
 	if dark {
@@ -411,6 +413,9 @@ func Pin16(role, hex string, dark bool, used map[int]bool) int {
 				return j
 			}
 		}
+	}
+	if role == "warning" {
+		return 3 + shift // the warning never leaves yellow: on green it reads as success, on cyan as info; its glyph tells it from what shares the slot
 	}
 	_, _, h := oklch.LCH(hex)
 	for _, base := range []int{shift, 8 - shift} {

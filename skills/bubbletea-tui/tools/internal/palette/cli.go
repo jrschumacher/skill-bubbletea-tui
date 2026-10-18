@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"tuikit/theme"
+	"tuitools/internal/cellshot"
 	"tuitools/internal/oklch"
 	"tuitools/internal/pyfmt"
 )
@@ -177,6 +178,10 @@ func check(path string, stdout, stderr io.Writer) int {
 		}
 	}
 	clashes := Clashes16(tf, path, stderr)
+	for _, x := range Inks16(tf) {
+		clashes++
+		fmt.Fprintf(stderr, "palette: %s: %s\n", path, x)
+	}
 	for _, x := range FarPins(tf) {
 		fmt.Fprintf(stderr, "palette: warning: %s: %s\n", path, farPinText(x))
 	}
@@ -200,6 +205,7 @@ type Finding16 struct {
 	Fail       bool   // check exits 1 on it
 	Pin        int    // the ansi16 colour that fixes it
 	kind       kind16
+	fixed      bool // Pin is set when found (a warm brand's slot, WarmPin16), not chosen by Pin16
 }
 
 type kind16 int
@@ -210,6 +216,9 @@ const (
 	hue16                 // a neutral on a hue (theme.ANSI16Neutrals)
 	share16               // two levels of the text ramp on one grey (theme.ANSI16Neutrals)
 	evict16               // primary on a status role's own slot while that role needs one
+	warm16                // a warm brand off its 16-colour slot (WarmPin16): magenta, red, or yellow on a light page
+	yield16               // warning on bright yellow 11 on a dark page, the slot a warm brand takes
+	warn16                // warning off yellow: on green (success's), blue or cyan (info's)
 )
 
 // PinJSON is the ansi16 block that applies the finding's pin.
@@ -240,6 +249,12 @@ func (x Finding16) PinJSON() string {
 //   - primary sitting on the own slot of a status role that needs a pin (a yellow brand
 //     natively on 3 while warning is on red): a warning that moves primary to the nearest
 //     free hue, so warning takes its yellow instead of being sent to cyan.
+//   - a warm brand (an orange, copper or amber, WarmPin16) anywhere but its slot: bright
+//     yellow 11 on a dark page, fg's grey on a light one, where it has no hue. A warning;
+//     on a dark page the warning then moves from 11 to the other yellow, 3.
+//   - the warning off yellow: on green 2/10, success's slot, it reads as OK and fails; on
+//     blue or cyan (4/12, 6/14), info's, it warns. Its pin is yellow, whatever else
+//     holds it: the warning never leaves yellow, and its glyph (▲ !) tells it apart.
 //
 // Which slot reads well on the page is the terminal's palette, so a pin is a suggestion:
 // a status role to its own slot, else the nearest free hue, never red for a non-error,
@@ -314,19 +329,92 @@ func Findings16(f theme.File) []Finding16 {
 		}
 		found = append(found, x)
 	}
+	// the warning off yellow, its own slot in every terminal palette: on green it reads as
+	// success, on blue or cyan as info (red is ANSI16Red's above)
+	for _, mode := range []string{"dark", "light"} {
+		if _, ok := f.Roles[mode]; !ok {
+			continue
+		}
+		if covered[key{mode, "warning"}] {
+			continue // on red: its red finding moves it, onto yellow
+		}
+		w := theme.ANSI16Index(f, mode, "warning")
+		reads := map[int]string{2: "success's green", 10: "success's green", 4: "info's blue", 12: "info's blue", 6: "info's cyan", 14: "info's cyan"}[w]
+		if reads == "" {
+			continue
+		}
+		// a clash with success or info on that slot is this finding, said once
+		found = slices.DeleteFunc(found, func(x Finding16) bool { return x.Mode == mode && x.Role == "warning" && x.kind == clash16 })
+		tc := theme.Resolve(f, mode != "light", false).P
+		state := "info"
+		if w == 2 || w == 10 {
+			state = "success"
+		}
+		found = append(found, Finding16{Mode: mode, Role: "warning", Col: hexOf(tc.Warning), Fail: state == "success", kind: warn16,
+			What: fmt.Sprintf("%s: warning %s draws as ANSI %d at 16 colours (-profile ansi), %s, so a warning reads as %s there; the warning keeps yellow", mode, hexOf(tc.Warning), w, reads, state)})
+	}
+	has := map[key]bool{}
+	for _, x := range found {
+		has[key{x.Mode, x.Role}] = true
+	}
+	// a warm brand has no slot of its own (WarmPin16): it takes yellow 11 on a dark page
+	// and no hue on a light one, before anything else is decided, so the evictions below
+	// never move it and the warning's pin sees its yellow taken
+	for _, mode := range []string{"dark", "light"} {
+		want, ok := WarmPin16(f, mode)
+		if !ok {
+			continue
+		}
+		tc := theme.Resolve(f, mode != "light", false).P
+		_, _, h := oklch.LCH(hexOf(tc.Primary))
+		if at := theme.ANSI16Index(f, mode, "primary"); at != want {
+			what := fmt.Sprintf("%s: primary %s (hue %.0f°, warm) draws as ANSI %d at 16 colours (-profile ansi), %s; a warm brand has no slot of its own there (red is error's, magenta the pink an orange is not), so it takes bright yellow and the warning the other yellow, told apart by the warning's glyph", mode, hexOf(tc.Primary), h, at, slotName(at))
+			if mode == "light" {
+				kind := "warm"
+				if !warm(h) {
+					kind = "yellow"
+				}
+				what = fmt.Sprintf("%s: primary %s (hue %.0f°, %s) draws as ANSI %d at 16 colours (-profile ansi), %s; on a light page a %s brand has no slot (yellow 3 is the warning's and 1.35:1 on white, cyan and green under 3:1, magenta the pink an orange is not), so it draws as fg, and the kit's focus as fg and bold", mode, hexOf(tc.Primary), h, kind, at, slotName(at), kind)
+			}
+			if i := slices.IndexFunc(found, func(x Finding16) bool { return x.Mode == mode && x.Role == "primary" }); i >= 0 {
+				found[i].Pin, found[i].fixed = want, true // its red or clash finding: the warm slot fixes that too
+			} else {
+				found = append(found, Finding16{Mode: mode, Role: "primary", Col: hexOf(tc.Primary), What: what, kind: warm16, Pin: want, fixed: true})
+				has[key{mode, "primary"}] = true
+			}
+		}
+		if mode != "light" && !has[key{mode, "warning"}] && theme.ANSI16Index(f, mode, "warning") == want {
+			found = append(found, Finding16{Mode: mode, Role: "warning", Col: hexOf(tc.Warning), kind: yield16,
+				What: fmt.Sprintf("%s: warning %s draws as ANSI %d at 16 colours (-profile ansi), bright yellow, the slot warm primary %s takes; the warning keeps the other yellow and its glyph", mode, hexOf(tc.Warning), want, hexOf(tc.Primary))})
+			has[key{mode, "warning"}] = true
+		}
+		// the brand's own steps (secondary, tertiary, accent) of a warm hue follow it off
+		// error's red and magenta, and off yellow 3 on a light page: copper's secondary drew
+		// the focused button in error's red, its accent every section title
+		for _, role := range []string{"secondary", "tertiary", "accent"} {
+			col := paletteHex(tc, role)
+			_, c, hr := oklch.LCH(col)
+			at := theme.ANSI16Index(f, mode, role)
+			off := map[int]bool{1: true, 9: true, 5: true, 13: true, 3: mode == "light", 11: mode == "light"}
+			if c < 0.04 || !(warm(hr) || mode == "light" && hueDiff(hr, yellowHue) <= ownHueMax) || at == want || !off[at] {
+				continue
+			}
+			found = append(found, Finding16{Mode: mode, Role: role, Col: col, kind: warm16, Pin: want, fixed: true,
+				What: fmt.Sprintf("%s: %s %s (hue %.0f°), a step of the warm brand, draws as ANSI %d at 16 colours (-profile ansi), %s, so the brand reads as %s there; it follows primary", mode, role, col, hr, at, slotName(at), map[bool]string{true: "an error", false: "another hue"}[at == 1 || at == 9])})
+		}
+	}
 	// a status role whose own slot (warning 3/11, success 2/10, info 4/12) is held by
 	// primary's native index: evict primary, since the terminal's palette owns that
 	// meaning, rather than send the status role to the nearest free hue
 	native := f
 	native.ANSI16 = nil
-	has := map[key]bool{}
-	for _, x := range found {
-		has[key{x.Mode, x.Role}] = true
-	}
 	for _, x := range found {
 		own, isStatus := ownSlot[x.Role]
 		if !isStatus || x.kind == hue16 || x.kind == share16 || has[key{x.Mode, "primary"}] {
 			continue
+		}
+		if _, warm := WarmPin16(f, x.Mode); warm {
+			continue // a warm brand's yellow is its own on a dark page (and it has none on a light one)
 		}
 		shift := 0
 		if x.Mode != "light" {
@@ -372,9 +460,15 @@ func Findings16(f theme.File) []Finding16 {
 					used[x.Mode][theme.ANSI16Index(f, x.Mode, r)] = true
 				}
 			}
+			for _, y := range found { // a warm brand's slot is held before any pin is chosen
+				if y.Mode == x.Mode && y.fixed {
+					used[x.Mode][y.Pin] = true
+				}
+			}
 		}
 		dark := x.Mode != "light"
 		switch {
+		case x.fixed:
 		case x.kind == hue16 || x.kind == share16:
 			found[i].Pin = greyPin(f, x.Mode, x.Role)
 			continue
@@ -425,6 +519,87 @@ func greyPin(f theme.File, mode, role string) int {
 		}
 	}
 	return own
+}
+
+// Ink16 is a pair a theme's primary pin draws below its floor at 16 colours (Inks16).
+type Ink16 struct {
+	Mode       string
+	Role, On   string  // the ink and what it is drawn on: primary on bg, fgSelected or onPrimary on primary
+	Hex        string  // the ink role as the theme writes it, truecolour hex
+	Index, OnI int     // the 16-colour slots the two draw as, after the kit's own ink swap (theme.Ink)
+	Ratio      float64 // their contrast in cellshot's palette (cellshot.Basic16)
+	Floor      float64
+}
+
+// Floors16 are the contrasts Inks16 asks of a primary pin: 3:1 for the brand as text
+// on the page, 4.5:1 for an ink on the brand's fill.
+var Floors16 = map[string]float64{"primary": 3, "fgSelected": 4.5, "onPrimary": 4.5}
+
+// Inks16 judges what a theme's ansi16 pin for primary draws, per mode, in the palette
+// cellshot renders the 16 colours in (cellshot.Basic16, VS Code's terminal), the one
+// the sheets show: primary as text on the page (bg), and on primary's fill the
+// selection ink (fgSelected, skipped under focus "fg", where the selection is fg) and
+// onPrimary (a filled tag, a bar header), each as the kit draws it (theme.Ink swaps an
+// ink that lands on the fill's own slot). The truecolour checks judge the hex; a pin
+// moves the brand to a slot they never saw: white on bright yellow is 1.17:1, yellow 3
+// on white 1.35:1. A grey pin is skipped: the kit draws focus as fg there (WarmPin16).
+func Inks16(f theme.File) []Ink16 {
+	var out []Ink16
+	for _, mode := range []string{"dark", "light"} {
+		n, pinned := f.ANSI16[mode]["primary"]
+		if !pinned || theme.Grey16(n) || f.Roles[mode] == (theme.Roles{}) {
+			continue
+		}
+		dark := mode != "light"
+		t := theme.Resolve16(f, dark)
+		tc := theme.Resolve(f, dark, false).P
+		p := t.P
+		pairs := []struct {
+			role, on  string
+			ink, fill color.Color
+			hex       string
+		}{{"primary", "bg", p.Primary, p.Bg, hexOf(tc.Primary)}}
+		if f.Expressions.Focus != "fg" {
+			pairs = append(pairs, struct {
+				role, on  string
+				ink, fill color.Color
+				hex       string
+			}{"fgSelected", "primary", t.Ink(p.FgSelected, p.Primary), p.Primary, hexOf(tc.FgSelected)})
+		}
+		pairs = append(pairs, struct {
+			role, on  string
+			ink, fill color.Color
+			hex       string
+		}{"onPrimary", "primary", t.Ink(p.OnPrimary, p.Primary), p.Primary, hexOf(tc.OnPrimary)})
+		for _, x := range pairs {
+			a, b := theme.Slot16(x.ink), theme.Slot16(x.fill)
+			if a < 0 || b < 0 {
+				continue
+			}
+			r := oklch.Contrast(basic16Hex(a), basic16Hex(b))
+			if r < Floors16[x.role] {
+				out = append(out, Ink16{Mode: mode, Role: x.role, On: x.on, Hex: x.hex, Index: a, OnI: b, Ratio: r, Floor: Floors16[x.role]})
+			}
+		}
+	}
+	return out
+}
+
+// basic16Hex is ANSI colour n as cellshot draws it.
+func basic16Hex(n int) string {
+	c := cellshot.Basic16(n)
+	return fmt.Sprintf("#%02X%02X%02X", c.R, c.G, c.B)
+}
+
+// String is the finding for check's stderr, without the path.
+func (x Ink16) String() string {
+	fix := "pin primary to a slot it reads on, or drop the pin"
+	switch x.Role {
+	case "fgSelected", "onPrimary":
+		fix = fmt.Sprintf("set %s to an ink that reads on %s too (a near-black on a light slot, a near-white on a dark one)", x.Role, slotName(x.OnI))
+	}
+	return fmt.Sprintf("%s: %s %s draws as ANSI %d on %s's ANSI %d at 16 colours (-profile ansi), %.2f:1 in cellshot's palette, under %.1f: %s",
+		x.Mode, x.Role, x.Hex, x.Index, x.On, x.OnI, x.Ratio, x.Floor, fix)
 }
 
 // Clashes16 prints Findings16 on stderr, each with its pin, and returns how many fail.
@@ -509,8 +684,9 @@ const ownHueMax = 25
 // when none does (an orange, 71° from yellow and from magenta alike: the status roles
 // keep their own slots and the brand takes the nearest free), when the brand has no
 // hue, or when the brand is a status role's own colour and yields its slot: natively on
-// it in this mode (evicted), or within ownHueMax of its hue. Each mode decides for
-// itself: a dark lime on 11 says nothing about a light amber primary.
+// it in this mode (evicted), or within ownHueMax of its hue. A warm brand (WarmPin16)
+// is primaryFirst: its slot is fixed, and the warning's follows it. Each mode decides
+// for itself: a dark lime on 11 says nothing about a light amber primary.
 func PinOrder(f theme.File, mode string, evicted bool) map[string]int {
 	if evicted || f.Roles[mode] == (theme.Roles{}) {
 		return keepRank
@@ -518,6 +694,9 @@ func PinOrder(f theme.File, mode string, evicted bool) map[string]int {
 	_, c, h := oklch.LCH(hexOf(theme.Resolve(f, mode != "light", false).P.Primary))
 	if c < 0.04 {
 		return keepRank
+	}
+	if warm(h) {
+		return primaryFirst // its slot is set (WarmPin16), and the warning's yellow follows from it
 	}
 	for _, slots := range ownSlot {
 		for _, n := range slots {
@@ -586,6 +765,9 @@ func FarPins(f theme.File) []FarPin {
 			if c < 0.04 {
 				continue
 			}
+			if _, warm := WarmPin16(f, mode); warm && role == "primary" {
+				continue // a warm brand off its slot is Findings16's (warm16), which names the slot
+			}
 			_, _, hs := oklch.LCH(hexOf(ansi.BasicColor(n)))
 			moved := hueDiff(h, hs)
 			if moved <= farPinMax {
@@ -604,8 +786,11 @@ func FarPins(f theme.File) []FarPin {
 				}
 			}
 			nearer, ok := Pins16(lifted)[mode][role]
-			if !ok || nearer == n {
+			if !ok || nearer == n || theme.Grey16(nearer) {
 				continue // the tool pins it nowhere (its native slot is right, or yielded), or here: nothing nearer to name
+			}
+			if _, _, hn := oklch.LCH(hexOf(ansi.BasicColor(nearer))); hueDiff(h, hn) >= moved {
+				continue // the tool's pin is no nearer its hue: nothing nearer to name
 			}
 			yielded := ""
 			for _, r := range sortedRoles16(pins) {
@@ -617,6 +802,46 @@ func FarPins(f theme.File) []FarPin {
 		}
 	}
 	return out
+}
+
+// warmMin is the lowest OKLCH hue warm calls warm: coral #D15D51 (28°) is warm, a
+// crimson (20°) is a red, whose nearest free slot, magenta, is a red's pink.
+const warmMin = 25
+
+// yellowHue is ANSI yellow's OKLCH hue, 110°.
+var yellowHue = func() float64 { _, _, h := oklch.LCH(hexOf(ansi.BasicColor(3))); return h }()
+
+// warm reports an OKLCH hue between warmMin and yellow's own (ownHueMax short of ANSI
+// yellow's 110°): the vermilions, oranges, coppers and ambers, 25°–85°. Their nearest
+// slots are error's red, the warning's yellow and magenta.
+func warm(h float64) bool {
+	return h >= warmMin && h < yellowHue && hueDiff(h, yellowHue) > ownHueMax
+}
+
+// WarmPin16 is where the brand draws at 16 colours in mode when it has no slot of its
+// own there, and whether it has none. A warm brand (warm: an orange, a copper, an
+// amber) has none on either page: red is error's, yellow the warning's, and magenta the
+// pink an orange's read forbids. On a dark page it takes bright yellow 11 and the warning
+// keeps the other yellow, 3; the warning's glyph (▲ !), not its hue, tells them apart, so
+// every warning mark carries one (ui.StateSparkline). On a light page it has no hue:
+// yellow 3 is 1.35:1 on white and magenta is pink, so it pins to fg's grey (0), and the
+// kit draws focus as fg and bold there (theme.ResolveProfile); its hue returns at 256
+// colours and truecolour. A yellow brand (within ownHueMax of yellow) has none on a light
+// page either: yellow is the warning's, and the slots it would move to, cyan 6 and green
+// 2, are under 3:1 on white. A brand of chroma under 0.04 has no hue to place.
+func WarmPin16(f theme.File, mode string) (int, bool) {
+	if f.Roles[mode] == (theme.Roles{}) {
+		return 0, false
+	}
+	_, c, h := oklch.LCH(hexOf(theme.Resolve(f, mode != "light", false).P.Primary))
+	switch {
+	case c < 0.04:
+	case warm(h) && mode != "light":
+		return 11, true
+	case mode == "light" && (warm(h) || hueDiff(h, yellowHue) <= ownHueMax):
+		return theme.GreySlot16("fg", false), true
+	}
+	return 0, false
 }
 
 // hueDiff is the smaller angle between two hues, in degrees.
@@ -671,6 +896,12 @@ func paletteHex(p theme.Palette, role string) string {
 		return hexOf(p.Success)
 	case "info":
 		return hexOf(p.Info)
+	case "secondary":
+		return hexOf(p.Secondary)
+	case "tertiary":
+		return hexOf(p.Tertiary)
+	case "accent":
+		return hexOf(p.Accent)
 	}
 	return ""
 }
@@ -817,6 +1048,9 @@ func derive(args []string, stdout, stderr io.Writer) int {
 		tf.ANSI16 = pins
 		for _, x := range FarPins(tf) {
 			fmt.Fprintf(stderr, "warning: %s\n", farPinText(x))
+		}
+		for _, x := range Inks16(tf) {
+			fmt.Fprintf(stderr, "warning: %s\n", x)
 		}
 	}
 	if sw, ok := opts["swatch"]; ok {
